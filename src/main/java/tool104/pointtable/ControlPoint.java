@@ -1,14 +1,15 @@
 package tool104.pointtable;
 
 /**
- * 点表中的一个可控点：可下发遥控命令的 IOA 及其命令类型。
- * 本阶段仅支持单点遥控 C_SC_NA_1（直接执行）。
+ * 点表中的一个可控点：可下发命令的 IOA 及其命令类型。
  */
 public record ControlPoint(int ioa, String name, CommandType commandType) {
 
     public enum CommandType {
         /** 单点遥控，直接执行 */
-        C_SC_NA_1
+        C_SC_NA_1,
+        /** 短浮点遥调（设定值），直接执行 */
+        C_SE_NC_1
     }
 
     public ControlPoint {

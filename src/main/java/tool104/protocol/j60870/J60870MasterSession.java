@@ -28,6 +28,7 @@ import org.openmuc.j60870.ServerEventListener;
 import org.openmuc.j60870.ie.IeDoublePointWithQuality;
 import org.openmuc.j60870.ie.IeNormalizedValue;
 import org.openmuc.j60870.ie.IeQualifierOfInterrogation;
+import org.openmuc.j60870.ie.IeQualifierOfSetPointCommand;
 import org.openmuc.j60870.ie.IeQuality;
 import org.openmuc.j60870.ie.IeScaledValue;
 import org.openmuc.j60870.ie.IeShortFloat;
@@ -237,6 +238,31 @@ public final class J60870MasterSession implements MasterSession {
 
     @Override
     public CompletableFuture<CommandResult> sendSingleCommand(int ioa, boolean on) {
+        return sendConfirmedCommand(ioa, conn -> {
+            conn.singleCommand(commonAddress, CauseOfTransmission.ACTIVATION, ioa,
+                    new IeSingleCommand(on, 0, false));
+            emitFrame(RawFrame.sent("C_SC_NA_1 单点遥控 ACT, CA=" + commonAddress + ", IOA=" + ioa
+                    + ", " + (on ? "合" : "分") + ", 直接执行"));
+        });
+    }
+
+    @Override
+    public CompletableFuture<CommandResult> sendSetpointCommand(int ioa, float value) {
+        return sendConfirmedCommand(ioa, conn -> {
+            // QL=0、S/E=false：直接执行
+            conn.setShortFloatCommand(commonAddress, CauseOfTransmission.ACTIVATION, ioa,
+                    new IeShortFloat(value), new IeQualifierOfSetPointCommand(0, false));
+            emitFrame(RawFrame.sent("C_SE_NC_1 遥调 ACT, CA=" + commonAddress + ", IOA=" + ioa
+                    + ", 值=" + value + ", 直接执行"));
+        });
+    }
+
+    private interface CommandSend {
+        void send(Connection conn) throws IOException;
+    }
+
+    /** 发出需要 ACTCON 确认的命令：按 IOA 挂起等待，由 {@link #resolveCommandConfirmation} 兑现或超时。 */
+    private CompletableFuture<CommandResult> sendConfirmedCommand(int ioa, CommandSend sender) {
         CompletableFuture<CommandResult> future = new CompletableFuture<>();
         Connection conn = substation;
         if (conn == null || !transferStarted) {
@@ -249,10 +275,7 @@ public final class J60870MasterSession implements MasterSession {
             return future;
         }
         try {
-            conn.singleCommand(commonAddress, CauseOfTransmission.ACTIVATION, ioa,
-                    new IeSingleCommand(on, 0, false));
-            emitFrame(RawFrame.sent("C_SC_NA_1 单点遥控 ACT, CA=" + commonAddress + ", IOA=" + ioa
-                    + ", " + (on ? "合" : "分") + ", 直接执行"));
+            sender.send(conn);
         } catch (IOException e) {
             pendingCommands.remove(ioa, pending);
             future.complete(CommandResult.failed("发送失败: " + e.getMessage()));
@@ -339,7 +362,8 @@ public final class J60870MasterSession implements MasterSession {
             }
             emitFrame(RawFrame.received(summarize(aSdu)));
             if (aSdu.getCauseOfTransmission() == CauseOfTransmission.ACTIVATION_CON
-                    && aSdu.getTypeIdentification() == ASduType.C_SC_NA_1) {
+                    && (aSdu.getTypeIdentification() == ASduType.C_SC_NA_1
+                            || aSdu.getTypeIdentification() == ASduType.C_SE_NC_1)) {
                 resolveCommandConfirmation(aSdu);
                 return;
             }

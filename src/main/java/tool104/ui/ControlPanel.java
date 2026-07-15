@@ -1,5 +1,6 @@
 package tool104.ui;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 import javafx.application.Platform;
@@ -9,6 +10,7 @@ import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
@@ -23,7 +25,8 @@ import tool104.protocol.MasterSession;
 import tool104.protocol.model.CommandResult;
 
 /**
- * 点表编辑 + 遥控下发面板。点表仅定义可控点（C_SC_NA_1 直接执行），与接收数据展示无关。
+ * 点表编辑 + 命令下发面板。点表定义可控点（遥控 C_SC_NA_1 / 遥调 C_SE_NC_1，均直接执行），
+ * 与接收数据展示无关。命令行按选中点的类型启用对应控件。
  */
 public final class ControlPanel extends BorderPane {
 
@@ -35,6 +38,9 @@ public final class ControlPanel extends BorderPane {
     private final Label message = new Label();
     private final Button closeButton = new Button("合闸 (ON)");
     private final Button openButton = new Button("分闸 (OFF)");
+    private final TextField setpointField = new TextField();
+    private final Button setpointButton = new Button("下发");
+    private boolean commandInFlight;
 
     public ControlPanel(PointTable pointTable, MasterSession session) {
         this.pointTable = pointTable;
@@ -52,13 +58,16 @@ public final class ControlPanel extends BorderPane {
         TextField nameField = new TextField();
         nameField.setPromptText("名称（可选）");
         nameField.setPrefWidth(110);
+        ComboBox<ControlPoint.CommandType> typeBox =
+                new ComboBox<>(FXCollections.observableArrayList(ControlPoint.CommandType.values()));
+        typeBox.getSelectionModel().select(ControlPoint.CommandType.C_SC_NA_1);
 
         Button add = new Button("添加");
         add.setOnAction(e -> {
             try {
                 int ioa = Integer.parseInt(ioaField.getText().trim());
                 pointTable.add(new ControlPoint(ioa, nameField.getText().trim(),
-                        ControlPoint.CommandType.C_SC_NA_1));
+                        typeBox.getValue()));
                 ioaField.clear();
                 nameField.clear();
                 showMessage("");
@@ -79,7 +88,7 @@ public final class ControlPanel extends BorderPane {
             }
         });
 
-        HBox editRow = new HBox(6, ioaField, nameField, add, remove);
+        HBox editRow = new HBox(6, ioaField, nameField, typeBox, add, remove);
         editRow.setAlignment(Pos.CENTER_LEFT);
 
         closeButton.setOnAction(e -> sendCommand(true));
@@ -87,9 +96,19 @@ public final class ControlPanel extends BorderPane {
         HBox commandRow = new HBox(6, new Label("遥控:"), closeButton, openButton);
         commandRow.setAlignment(Pos.CENTER_LEFT);
 
+        setpointField.setPromptText("设定值");
+        setpointField.setPrefWidth(90);
+        setpointButton.setOnAction(e -> sendSetpoint());
+        HBox setpointRow = new HBox(6, new Label("遥调:"), setpointField, setpointButton);
+        setpointRow.setAlignment(Pos.CENTER_LEFT);
+
+        table.getSelectionModel().selectedItemProperty()
+                .addListener((obs, oldSel, newSel) -> updateCommandControls());
+        updateCommandControls();
+
         message.setWrapText(true);
 
-        VBox bottom = new VBox(8, editRow, commandRow, message);
+        VBox bottom = new VBox(8, editRow, commandRow, setpointRow, message);
         bottom.setPadding(new Insets(8, 6, 6, 6));
 
         Label title = new Label("点表（可控点）");
@@ -107,18 +126,40 @@ public final class ControlPanel extends BorderPane {
             showMessage("请先在点表中选择一个可控点");
             return;
         }
-        setCommandButtonsDisabled(true);
         String action = (on ? "合闸" : "分闸") + " IOA=" + selected.ioa();
+        dispatch(action, session.sendSingleCommand(selected.ioa(), on));
+    }
+
+    private void sendSetpoint() {
+        ControlPoint selected = table.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            showMessage("请先在点表中选择一个可控点");
+            return;
+        }
+        float value;
+        try {
+            value = Float.parseFloat(setpointField.getText().trim());
+        } catch (NumberFormatException ex) {
+            showMessage("遥调值必须是数字");
+            return;
+        }
+        String action = "遥调 IOA=" + selected.ioa() + " 值=" + value;
+        dispatch(action, session.sendSetpointCommand(selected.ioa(), value));
+    }
+
+    private void dispatch(String action, CompletableFuture<CommandResult> future) {
+        commandInFlight = true;
+        updateCommandControls();
         showMessage(action + " 已下发，等待确认…");
-        session.sendSingleCommand(selected.ioa(), on).whenComplete((result, error) ->
-                Platform.runLater(() -> {
-                    setCommandButtonsDisabled(false);
-                    if (error != null) {
-                        showMessage(action + " 异常: " + error.getMessage());
-                    } else {
-                        showMessage(action + " → " + describe(result));
-                    }
-                }));
+        future.whenComplete((result, error) -> Platform.runLater(() -> {
+            commandInFlight = false;
+            updateCommandControls();
+            if (error != null) {
+                showMessage(action + " 异常: " + error.getMessage());
+            } else {
+                showMessage(action + " → " + describe(result));
+            }
+        }));
     }
 
     private static String describe(CommandResult result) {
@@ -130,9 +171,17 @@ public final class ControlPanel extends BorderPane {
         };
     }
 
-    private void setCommandButtonsDisabled(boolean disabled) {
-        closeButton.setDisable(disabled);
-        openButton.setDisable(disabled);
+    /** 按选中点的命令类型启用对应的命令控件；命令在途时全部禁用。 */
+    private void updateCommandControls() {
+        ControlPoint selected = table.getSelectionModel().getSelectedItem();
+        boolean singleCommand = !commandInFlight && selected != null
+                && selected.commandType() == ControlPoint.CommandType.C_SC_NA_1;
+        boolean setpoint = !commandInFlight && selected != null
+                && selected.commandType() == ControlPoint.CommandType.C_SE_NC_1;
+        closeButton.setDisable(!singleCommand);
+        openButton.setDisable(!singleCommand);
+        setpointField.setDisable(!setpoint);
+        setpointButton.setDisable(!setpoint);
     }
 
     private void showMessage(String text) {

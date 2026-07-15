@@ -19,8 +19,12 @@ public final class FakeMasterSession implements MasterSession {
     public record SentCommand(int ioa, boolean on) {
     }
 
+    public record SentSetpoint(int ioa, float value) {
+    }
+
     private final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
     private final List<SentCommand> sentCommands = new ArrayList<>();
+    private final List<SentSetpoint> sentSetpoints = new ArrayList<>();
     private boolean running;
     private boolean connected;
     private int interrogationCount;
@@ -84,6 +88,12 @@ public final class FakeMasterSession implements MasterSession {
     }
 
     @Override
+    public CompletableFuture<CommandResult> sendSetpointCommand(int ioa, float value) {
+        sentSetpoints.add(new SentSetpoint(ioa, value));
+        return CompletableFuture.completedFuture(nextCommandResult);
+    }
+
+    @Override
     public void addListener(SessionListener listener) {
         listeners.add(listener);
     }
@@ -117,6 +127,10 @@ public final class FakeMasterSession implements MasterSession {
 
     public List<SentCommand> sentCommands() {
         return sentCommands;
+    }
+
+    public List<SentSetpoint> sentSetpoints() {
+        return sentSetpoints;
     }
 
     public int port() {

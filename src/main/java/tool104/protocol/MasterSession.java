@@ -45,6 +45,12 @@ public interface MasterSession extends AutoCloseable {
      */
     CompletableFuture<CommandResult> sendSingleCommand(int ioa, boolean on);
 
+    /**
+     * 下发短浮点遥调（C_SE_NC_1 设定值命令，直接执行）。
+     * 异步返回确认结果，语义同 {@link #sendSingleCommand}。
+     */
+    CompletableFuture<CommandResult> sendSetpointCommand(int ioa, float value);
+
     void addListener(SessionListener listener);
 
     void removeListener(SessionListener listener);

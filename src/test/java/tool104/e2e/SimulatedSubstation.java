@@ -97,6 +97,12 @@ public final class SimulatedSubstation {
                         System.out.println("已确认遥控 IOA="
                                 + aSdu.getInformationObjects()[0].getInformationObjectAddress());
                     }
+                    case C_SE_NC_1 -> {
+                        connection.sendConfirmation(aSdu);
+                        System.out.println("已确认遥调 IOA="
+                                + aSdu.getInformationObjects()[0].getInformationObjectAddress()
+                                + " 值=" + setpointValue(aSdu));
+                    }
                     default -> {
                     }
                 }
@@ -112,6 +118,10 @@ public final class SimulatedSubstation {
 
         @Override
         public void dataTransferStateChanged(Connection connection, boolean stopped) {
+        }
+
+        private static float setpointValue(ASdu aSdu) {
+            return ((IeShortFloat) aSdu.getInformationObjects()[0].getInformationElements()[0][0]).getValue();
         }
     }
 }

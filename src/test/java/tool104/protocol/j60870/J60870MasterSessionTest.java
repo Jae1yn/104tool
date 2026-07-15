@@ -210,6 +210,47 @@ class J60870MasterSessionTest {
     }
 
     @Test
+    void setpointCommandConfirmedBySubstation() throws Exception {
+        connectSubstation();
+        awaitConnectionState(ConnectionEvent.State.CONNECTED);
+
+        var future = session.sendSetpointCommand(7001, 36.6f);
+
+        ASdu command = receivedBySubstation.poll(5, TimeUnit.SECONDS);
+        assertNotNull(command);
+        assertEquals(ASduType.C_SE_NC_1, command.getTypeIdentification());
+        assertEquals(7001, command.getInformationObjects()[0].getInformationObjectAddress());
+        IeShortFloat sent = (IeShortFloat) command.getInformationObjects()[0].getInformationElements()[0][0];
+        assertEquals(36.6f, sent.getValue());
+        substation.sendConfirmation(command);
+
+        CommandResult result = future.get(5, TimeUnit.SECONDS);
+        assertEquals(CommandResult.Status.CONFIRMED, result.status());
+    }
+
+    @Test
+    void setpointCommandNegativeConfirmation() throws Exception {
+        connectSubstation();
+        awaitConnectionState(ConnectionEvent.State.CONNECTED);
+
+        var future = session.sendSetpointCommand(7002, -1.5f);
+
+        ASdu command = receivedBySubstation.poll(5, TimeUnit.SECONDS);
+        assertNotNull(command);
+        substation.send(new ASdu(ASduType.C_SE_NC_1, false, CauseOfTransmission.ACTIVATION_CON,
+                false, true, 0, COMMON_ADDRESS, command.getInformationObjects()));
+
+        CommandResult result = future.get(5, TimeUnit.SECONDS);
+        assertEquals(CommandResult.Status.NEGATIVE, result.status());
+    }
+
+    @Test
+    void setpointCommandWithoutConnectionFailsImmediately() throws Exception {
+        CommandResult result = session.sendSetpointCommand(7001, 1.0f).get(1, TimeUnit.SECONDS);
+        assertEquals(CommandResult.Status.FAILED, result.status());
+    }
+
+    @Test
     void secondSubstationConnectionIsRejected() throws Exception {
         connectSubstation();
         awaitConnectionState(ConnectionEvent.State.CONNECTED);
