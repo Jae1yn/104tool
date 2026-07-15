@@ -88,8 +88,10 @@ public final class ControlPanel extends BorderPane {
             }
         });
 
-        HBox editRow = new HBox(6, ioaField, nameField, typeBox, add, remove);
-        editRow.setAlignment(Pos.CENTER_LEFT);
+        HBox editFieldsRow = new HBox(6, ioaField, nameField);
+        editFieldsRow.setAlignment(Pos.CENTER_LEFT);
+        HBox editActionsRow = new HBox(6, typeBox, add, remove);
+        editActionsRow.setAlignment(Pos.CENTER_LEFT);
 
         closeButton.setOnAction(e -> sendCommand(true));
         openButton.setOnAction(e -> sendCommand(false));
@@ -108,7 +110,7 @@ public final class ControlPanel extends BorderPane {
 
         message.setWrapText(true);
 
-        VBox bottom = new VBox(8, editRow, commandRow, setpointRow, message);
+        VBox bottom = new VBox(8, editFieldsRow, editActionsRow, commandRow, setpointRow, message);
         bottom.setPadding(new Insets(8, 6, 6, 6));
 
         Label title = new Label("点表（可控点）");
