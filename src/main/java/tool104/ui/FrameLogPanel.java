@@ -11,6 +11,7 @@ import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
+import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
@@ -18,6 +19,7 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.SplitPane;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
@@ -34,11 +36,13 @@ import javafx.scene.text.Font;
 import javafx.stage.FileChooser;
 
 import tool104.framelog.FrameLog;
+import tool104.protocol.ApduExplainer;
 import tool104.protocol.model.RawFrame;
 
 /**
- * 报文日志视图：表格分列展示（时间/方向/摘要/原始帧），选中行在下方详情区完整展示可复制；
- * 可清空、导出。自动滚动在有选中行时暂停（Esc 清除选中恢复），避免查看详情时被新报文冲走。
+ * 报文日志视图：表格分列展示（时间/方向/摘要/原始帧），选中行在下方详情区逐字段剖析原始帧
+ * （APCI/ASDU 头/信息对象逐组标注含义），可拖动分隔条调高度，内容可复制；可清空、导出。
+ * 自动滚动在有选中行时暂停（Esc 清除选中恢复），避免查看详情时被新报文冲走。
  */
 public final class FrameLogPanel extends BorderPane {
 
@@ -78,9 +82,8 @@ public final class FrameLogPanel extends BorderPane {
         });
 
         detail.setEditable(false);
-        detail.setWrapText(true);
+        detail.setWrapText(false);
         detail.setFont(MONO);
-        detail.setPrefRowCount(3);
         detail.setPromptText(DETAIL_PROMPT);
 
         Button clear = new Button("清空");
@@ -107,9 +110,12 @@ public final class FrameLogPanel extends BorderPane {
         header.setAlignment(Pos.CENTER_LEFT);
         header.setPadding(new Insets(6));
 
+        SplitPane split = new SplitPane(table, detail);
+        split.setOrientation(Orientation.VERTICAL);
+        split.setDividerPositions(0.65);
+
         setTop(header);
-        setCenter(table);
-        setBottom(detail);
+        setCenter(split);
 
         for (RawFrame frame : frameLog.snapshot()) {
             append(frame);
@@ -137,11 +143,15 @@ public final class FrameLogPanel extends BorderPane {
             detail.clear();
             return;
         }
+        detail.setText(detailText(frame));
+    }
+
+    private static String detailText(RawFrame frame) {
         StringBuilder sb = new StringBuilder(FrameLog.format(frame));
         if (frame.rawHex() != null) {
-            sb.append('\n').append("原始帧: ").append(frame.rawHex());
+            sb.append("\n\n").append(ApduExplainer.explain(frame.rawHex()));
         }
-        detail.setText(sb.toString());
+        return sb.toString();
     }
 
     private ContextMenu buildContextMenu() {
@@ -151,7 +161,9 @@ public final class FrameLogPanel extends BorderPane {
         copyRaw.setOnAction(e -> copySelected(RawFrame::rawHex));
         MenuItem copyLine = new MenuItem("复制整行");
         copyLine.setOnAction(e -> copySelected(FrameLog::format));
-        return new ContextMenu(copySummary, copyRaw, copyLine);
+        MenuItem copyExplain = new MenuItem("复制解析");
+        copyExplain.setOnAction(e -> copySelected(FrameLogPanel::detailText));
+        return new ContextMenu(copySummary, copyRaw, copyLine, copyExplain);
     }
 
     private void copySelected(Function<RawFrame, String> extractor) {
