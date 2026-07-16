@@ -6,9 +6,11 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
@@ -16,6 +18,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import javax.net.ServerSocketFactory;
+import javax.net.SocketFactory;
 
 import org.openmuc.j60870.ASdu;
 import org.openmuc.j60870.ASduType;
@@ -76,6 +79,84 @@ public final class J60870MasterSession implements MasterSession {
     private volatile long connectGeneration;
 
     private record PendingCommand(CompletableFuture<CommandResult> future) {
+    }
+
+    // ---- 原始帧捕获（TappedSocket 旁路抓帧，与摘要配对）----
+
+    private static final HexFormat HEX = HexFormat.ofDelimiter(" ").withUpperCase();
+
+    /**
+     * 收到的 I 帧原始字节队列：tap 在 j60870 读线程上切出帧入队，newASdu 回调（j60870 派发在其它线程，
+     * 但按连接内顺序串行）按 FIFO 取走配对。连接断开时清空，防止跨连接错配。
+     */
+    private final ConcurrentLinkedQueue<String> receivedRawQueue = new ConcurrentLinkedQueue<>();
+    /** 我方 API 调用发帧时的捕获槽：调用前置入列表，j60870 在同线程内写出，tap 填入原始字节。 */
+    private final ThreadLocal<List<String>> sendCapture = new ThreadLocal<>();
+
+    private void onApdu(boolean sent, byte[] apdu) {
+        String hex = HEX.formatHex(apdu);
+        int ctl1 = apdu.length >= 3 ? apdu[2] & 0xFF : 0;
+        boolean iFrame = (ctl1 & 0x01) == 0;
+        if (sent) {
+            List<String> capture = sendCapture.get();
+            if (capture != null && iFrame) {
+                capture.add(hex);
+                return;
+            }
+            // j60870 内部自动发出：STARTDT/STOPDT/TESTFR 应答、S 帧确认等
+            emitFrame(RawFrame.sent(apciLabel(apdu), hex));
+            return;
+        }
+        if (iFrame) {
+            receivedRawQueue.add(hex);
+            return;
+        }
+        emitFrame(RawFrame.received(apciLabel(apdu), hex));
+    }
+
+    /** 取走与当前 newASdu 回调配对的原始帧 hex；取不到返回 null（优雅降级）。 */
+    private String takeReceivedRaw() {
+        return receivedRawQueue.poll();
+    }
+
+    /** 在捕获槽内执行我方发帧调用，返回发出帧的 hex（未捕获到返回 null）。 */
+    private String captureSend(SendAction action) throws IOException {
+        List<String> capture = new ArrayList<>(1);
+        sendCapture.set(capture);
+        try {
+            action.run();
+        } finally {
+            sendCapture.remove();
+        }
+        return capture.isEmpty() ? null : String.join(" / ", capture);
+    }
+
+    private interface SendAction {
+        void run() throws IOException;
+    }
+
+    /** 从 APCI 控制域解析 U/S 帧标注。 */
+    private static String apciLabel(byte[] apdu) {
+        if (apdu.length < 6) {
+            return "APCI（不完整）";
+        }
+        int ctl1 = apdu[2] & 0xFF;
+        if ((ctl1 & 0x03) == 0x03) {
+            return switch (ctl1) {
+                case 0x07 -> "U帧 STARTDT_ACT";
+                case 0x0B -> "U帧 STARTDT_CON";
+                case 0x13 -> "U帧 STOPDT_ACT";
+                case 0x23 -> "U帧 STOPDT_CON";
+                case 0x43 -> "U帧 TESTFR_ACT";
+                case 0x83 -> "U帧 TESTFR_CON";
+                default -> "U帧";
+            };
+        }
+        if ((ctl1 & 0x03) == 0x01) {
+            int recvSeq = ((apdu[4] & 0xFE) >> 1) | ((apdu[5] & 0xFF) << 7);
+            return "S帧 确认 recvSeq=" + recvSeq;
+        }
+        return "I帧";
     }
 
     public J60870MasterSession(ConnectionMode connectionMode, String substationHost, int port, int commonAddress,
@@ -166,6 +247,7 @@ public final class J60870MasterSession implements MasterSession {
         try {
             connection = new ClientConnectionBuilder(host)
                     .setPort(targetPort)
+                    .setSocketFactory(new TappingSocketFactory())
                     .setConnectionEventListener(new SubstationConnectionListener(generation))
                     .build();
         } catch (IOException e) {
@@ -224,16 +306,17 @@ public final class J60870MasterSession implements MasterSession {
     @Override
     public void sendGeneralInterrogation() throws IOException {
         Connection conn = requireConnected();
-        conn.interrogation(commonAddress, CauseOfTransmission.ACTIVATION, new IeQualifierOfInterrogation(20));
-        emitFrame(RawFrame.sent("C_IC_NA_1 总召唤 ACT, CA=" + commonAddress + ", QOI=20"));
+        String raw = captureSend(() -> conn.interrogation(commonAddress, CauseOfTransmission.ACTIVATION,
+                new IeQualifierOfInterrogation(20)));
+        emitFrame(RawFrame.sent("C_IC_NA_1 总召唤 ACT, CA=" + commonAddress + ", QOI=20", raw));
     }
 
     @Override
     public void sendClockSync() throws IOException {
         Connection conn = requireConnected();
         Instant now = Instant.now();
-        conn.synchronizeClocks(commonAddress, new IeTime56(now.toEpochMilli()));
-        emitFrame(RawFrame.sent("C_CS_NA_1 时钟同步 ACT, CA=" + commonAddress + ", time=" + now));
+        String raw = captureSend(() -> conn.synchronizeClocks(commonAddress, new IeTime56(now.toEpochMilli())));
+        emitFrame(RawFrame.sent("C_CS_NA_1 时钟同步 ACT, CA=" + commonAddress + ", time=" + now, raw));
     }
 
     @Override
@@ -241,8 +324,8 @@ public final class J60870MasterSession implements MasterSession {
         return sendConfirmedCommand(ioa, conn -> {
             conn.singleCommand(commonAddress, CauseOfTransmission.ACTIVATION, ioa,
                     new IeSingleCommand(on, 0, false));
-            emitFrame(RawFrame.sent("C_SC_NA_1 单点遥控 ACT, CA=" + commonAddress + ", IOA=" + ioa
-                    + ", " + (on ? "合" : "分") + ", 直接执行"));
+            return "C_SC_NA_1 单点遥控 ACT, CA=" + commonAddress + ", IOA=" + ioa
+                    + ", " + (on ? "合" : "分") + ", 直接执行";
         });
     }
 
@@ -252,13 +335,14 @@ public final class J60870MasterSession implements MasterSession {
             // QL=0、S/E=false：直接执行
             conn.setShortFloatCommand(commonAddress, CauseOfTransmission.ACTIVATION, ioa,
                     new IeShortFloat(value), new IeQualifierOfSetPointCommand(0, false));
-            emitFrame(RawFrame.sent("C_SE_NC_1 遥调 ACT, CA=" + commonAddress + ", IOA=" + ioa
-                    + ", 值=" + value + ", 直接执行"));
+            return "C_SE_NC_1 遥调 ACT, CA=" + commonAddress + ", IOA=" + ioa
+                    + ", 值=" + value + ", 直接执行";
         });
     }
 
     private interface CommandSend {
-        void send(Connection conn) throws IOException;
+        /** 执行 j60870 发送调用，返回报文日志摘要文案。 */
+        String send(Connection conn) throws IOException;
     }
 
     /** 发出需要 ACTCON 确认的命令：按 IOA 挂起等待，由 {@link #resolveCommandConfirmation} 兑现或超时。 */
@@ -275,7 +359,9 @@ public final class J60870MasterSession implements MasterSession {
             return future;
         }
         try {
-            sender.send(conn);
+            String[] summary = new String[1];
+            String raw = captureSend(() -> summary[0] = sender.send(conn));
+            emitFrame(RawFrame.sent(summary[0], raw));
         } catch (IOException e) {
             pendingCommands.remove(ioa, pending);
             future.complete(CommandResult.failed("发送失败: " + e.getMessage()));
@@ -360,7 +446,7 @@ public final class J60870MasterSession implements MasterSession {
                 connection.close();
                 return;
             }
-            emitFrame(RawFrame.received(summarize(aSdu)));
+            emitFrame(RawFrame.received(summarize(aSdu), takeReceivedRaw()));
             if (aSdu.getCauseOfTransmission() == CauseOfTransmission.ACTIVATION_CON
                     && (aSdu.getTypeIdentification() == ASduType.C_SC_NA_1
                             || aSdu.getTypeIdentification() == ASduType.C_SE_NC_1)) {
@@ -379,6 +465,7 @@ public final class J60870MasterSession implements MasterSession {
             if (substation == connection) {
                 substation = null;
                 transferStarted = false;
+                receivedRawQueue.clear();
             }
             if (stale()) {
                 // 过期连接（stop/reconfigure 之前建立的）关闭时不得触发重拨，
@@ -608,7 +695,38 @@ public final class J60870MasterSession implements MasterSession {
         public Socket accept() throws IOException {
             Socket socket = super.accept();
             remoteAddress = socket.getInetAddress().getHostAddress() + ":" + socket.getPort();
-            return socket;
+            return new TappedSocket(socket, J60870MasterSession.this::onApdu);
+        }
+    }
+
+    /** DIAL 模式的客户端 socket 工厂：返回带旁路抓帧的 socket。 */
+    private final class TappingSocketFactory extends SocketFactory {
+
+        @Override
+        public Socket createSocket() {
+            return new TappedSocket(new Socket(), J60870MasterSession.this::onApdu);
+        }
+
+        @Override
+        public Socket createSocket(String host, int port) throws IOException {
+            return new TappedSocket(new Socket(host, port), J60870MasterSession.this::onApdu);
+        }
+
+        @Override
+        public Socket createSocket(String host, int port, InetAddress localHost, int localPort) throws IOException {
+            return new TappedSocket(new Socket(host, port, localHost, localPort), J60870MasterSession.this::onApdu);
+        }
+
+        @Override
+        public Socket createSocket(InetAddress host, int port) throws IOException {
+            return new TappedSocket(new Socket(host, port), J60870MasterSession.this::onApdu);
+        }
+
+        @Override
+        public Socket createSocket(InetAddress address, int port, InetAddress localAddress, int localPort)
+                throws IOException {
+            return new TappedSocket(new Socket(address, port, localAddress, localPort),
+                    J60870MasterSession.this::onApdu);
         }
     }
 }

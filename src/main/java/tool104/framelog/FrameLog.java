@@ -83,6 +83,7 @@ public final class FrameLog {
 
     public static String format(RawFrame frame) {
         String arrow = frame.direction() == RawFrame.Direction.SENT ? "→" : "←";
-        return TIME_FORMAT.format(frame.timestamp()) + " " + arrow + " " + frame.summary();
+        String line = TIME_FORMAT.format(frame.timestamp()) + " " + arrow + " " + frame.summary();
+        return frame.rawHex() == null ? line : line + " | " + frame.rawHex();
     }
 }

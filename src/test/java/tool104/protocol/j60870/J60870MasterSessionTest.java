@@ -251,6 +251,50 @@ class J60870MasterSessionTest {
     }
 
     @Test
+    void framesCarryRawApduHex() throws Exception {
+        connectSubstation();
+        awaitConnectionState(ConnectionEvent.State.CONNECTED);
+
+        // 发出方向：总召摘要须带原始帧（I 帧，类型 0x64 = C_IC_NA_1）
+        session.sendGeneralInterrogation();
+        RawFrame sent = awaitFrame(f -> f.summary().startsWith("C_IC_NA_1"));
+        assertNotNull(sent.rawHex(), "下发帧应带原始 APDU hex");
+        assertTrue(sent.rawHex().startsWith("68 "), "原始帧应以起始字节 68 开头: " + sent.rawHex());
+        assertTrue(sent.rawHex().contains("64"), "总召 APDU 应含类型标识 0x64: " + sent.rawHex());
+
+        // 接收方向：子站上送遥测的摘要须带原始帧
+        substation.send(new ASdu(ASduType.M_ME_NC_1, false, CauseOfTransmission.SPONTANEOUS,
+                false, false, 0, COMMON_ADDRESS,
+                new InformationObject(4001, new IeShortFloat(12.5f),
+                        new org.openmuc.j60870.ie.IeQuality(false, false, false, false, false))));
+        RawFrame received = awaitFrame(f -> f.summary().startsWith("M_ME_NC_1"));
+        assertNotNull(received.rawHex(), "接收帧应带原始 APDU hex");
+        assertTrue(received.rawHex().startsWith("68 "), "原始帧应以起始字节 68 开头: " + received.rawHex());
+    }
+
+    @Test
+    void startdtControlFramesAppearInLog() throws Exception {
+        connectSubstation();
+        awaitConnectionState(ConnectionEvent.State.CONNECTED);
+
+        // LISTEN 模式下子站发 STARTDT_ACT、j60870 自动回 STARTDT_CON，均应作为独立日志条目可见
+        RawFrame act = awaitFrame(f -> f.summary().contains("STARTDT_ACT") && f.rawHex() != null);
+        assertTrue(act.rawHex().startsWith("68 04 07"), "STARTDT_ACT 原始帧: " + act.rawHex());
+        RawFrame con = awaitFrame(f -> f.summary().contains("STARTDT_CON") && f.rawHex() != null);
+        assertTrue(con.rawHex().startsWith("68 04 0B"), "STARTDT_CON 原始帧: " + con.rawHex());
+    }
+
+    private RawFrame awaitFrame(java.util.function.Predicate<RawFrame> matcher) throws InterruptedException {
+        while (true) {
+            RawFrame frame = frames.poll(5, TimeUnit.SECONDS);
+            assertNotNull(frame, "等待匹配的报文日志条目超时");
+            if (matcher.test(frame)) {
+                return frame;
+            }
+        }
+    }
+
+    @Test
     void secondSubstationConnectionIsRejected() throws Exception {
         connectSubstation();
         awaitConnectionState(ConnectionEvent.State.CONNECTED);
