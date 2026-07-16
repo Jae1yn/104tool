@@ -451,6 +451,10 @@ public final class J60870MasterSession implements MasterSession {
                     && (aSdu.getTypeIdentification() == ASduType.C_SC_NA_1
                             || aSdu.getTypeIdentification() == ASduType.C_SE_NC_1)) {
                 resolveCommandConfirmation(aSdu);
+                // 确认帧回显了命令值：同样进实时数据表，展示子站已接受的遥控/遥调状态
+                for (PointUpdate update : decode(aSdu)) {
+                    emitPointUpdate(update);
+                }
                 return;
             }
             if (aSdu.getTypeIdentification().name().startsWith("M_")) {
@@ -550,7 +554,7 @@ public final class J60870MasterSession implements MasterSession {
             return updates;
         }
         String type = aSdu.getTypeIdentification().name();
-        String cause = aSdu.getCauseOfTransmission().name();
+        String cause = aSdu.getCauseOfTransmission().name() + (aSdu.isNegativeConfirm() ? "(否定)" : "");
         for (InformationObject io : objects) {
             InformationElement[][] rows = io.getInformationElements();
             for (int i = 0; i < rows.length; i++) {
@@ -566,7 +570,9 @@ public final class J60870MasterSession implements MasterSession {
         String quality = "";
         Instant timestamp = Instant.now();
         for (InformationElement element : row) {
-            if (element instanceof IeSinglePointWithQuality sp) {
+            if (element instanceof IeSingleCommand sc) {
+                value = sc.isCommandStateOn() ? "合(1)" : "分(0)";
+            } else if (element instanceof IeSinglePointWithQuality sp) {
                 value = sp.isOn() ? "合(1)" : "分(0)";
                 quality = qualityText(sp.isInvalid(), sp.isNotTopical(), sp.isSubstituted(), sp.isBlocked(), false);
             } else if (element instanceof IeDoublePointWithQuality dp) {

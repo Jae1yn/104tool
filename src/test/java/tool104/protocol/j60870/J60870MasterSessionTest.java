@@ -192,6 +192,14 @@ class J60870MasterSessionTest {
 
         CommandResult result = future.get(5, TimeUnit.SECONDS);
         assertEquals(CommandResult.Status.CONFIRMED, result.status());
+
+        // 确认帧回显的命令状态应进入实时数据
+        PointUpdate update = pointUpdates.poll(5, TimeUnit.SECONDS);
+        assertNotNull(update, "遥控确认后应产生实时数据更新");
+        assertEquals(6001, update.ioa());
+        assertEquals("C_SC_NA_1", update.type());
+        assertEquals("合(1)", update.value());
+        assertEquals("ACTIVATION_CON", update.cause());
     }
 
     @Test
@@ -226,6 +234,13 @@ class J60870MasterSessionTest {
 
         CommandResult result = future.get(5, TimeUnit.SECONDS);
         assertEquals(CommandResult.Status.CONFIRMED, result.status());
+
+        PointUpdate update = pointUpdates.poll(5, TimeUnit.SECONDS);
+        assertNotNull(update, "遥调确认后应产生实时数据更新");
+        assertEquals(7001, update.ioa());
+        assertEquals("C_SE_NC_1", update.type());
+        assertEquals("36.6", update.value());
+        assertEquals("ACTIVATION_CON", update.cause());
     }
 
     @Test
@@ -242,6 +257,11 @@ class J60870MasterSessionTest {
 
         CommandResult result = future.get(5, TimeUnit.SECONDS);
         assertEquals(CommandResult.Status.NEGATIVE, result.status());
+
+        PointUpdate update = pointUpdates.poll(5, TimeUnit.SECONDS);
+        assertNotNull(update, "否定确认也应产生实时数据更新");
+        assertEquals(7002, update.ioa());
+        assertEquals("ACTIVATION_CON(否定)", update.cause());
     }
 
     @Test

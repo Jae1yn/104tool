@@ -46,7 +46,7 @@ public final class LiveDataPanel extends BorderPane {
         clear.setOnAction(e -> store.clear());
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox header = new HBox(8, new Label("实时数据（遥测/遥信）"), spacer, clear);
+        HBox header = new HBox(8, new Label("实时数据（遥测/遥信/遥控/遥调）"), spacer, clear);
         header.setAlignment(Pos.CENTER_LEFT);
         header.setPadding(new Insets(6));
 
