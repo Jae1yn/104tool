@@ -46,6 +46,11 @@ public class Main extends Application {
         MainWindow window = new MainWindow(session, settings, liveData, frameLog, pointTable,
                 this::applySettings);
 
+        // 点表中的可控点常驻实时表（未下发显示占位）；点表变更与实时数据清空后保持同步
+        pointTable.subscribe(() -> liveData.syncControlPoints(pointTable.list()));
+        liveData.subscribeClear(() -> liveData.syncControlPoints(pointTable.list()));
+        liveData.syncControlPoints(pointTable.list());
+
         session.addListener(new SessionListener() {
             @Override
             public void onConnectionEvent(ConnectionEvent event) {

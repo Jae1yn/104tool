@@ -22,6 +22,19 @@ class PointTableTest {
     }
 
     @Test
+    void notifiesSubscribersOnChanges() {
+        PointTable table = new PointTable(file());
+        int[] notified = {0};
+        table.subscribe(() -> notified[0]++);
+
+        table.add(new ControlPoint(6001, "开关", CommandType.C_SC_NA_1));
+        table.update(new ControlPoint(6001, "开关改名", CommandType.C_SC_NA_1));
+        table.remove(6001);
+
+        assertEquals(3, notified[0], "增/改/删各通知一次");
+    }
+
+    @Test
     void addRemoveAndListSortedByIoa() {
         PointTable table = new PointTable(file());
         table.add(new ControlPoint(6002, "开关2", CommandType.C_SC_NA_1));

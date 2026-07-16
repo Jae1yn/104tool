@@ -40,7 +40,8 @@ public final class LiveDataPanel extends BorderPane {
         table.getColumns().add(column("值", 90, PointUpdate::value));
         table.getColumns().add(column("品质", 80, PointUpdate::quality));
         table.getColumns().add(column("传送原因", 170, PointUpdate::cause));
-        table.getColumns().add(column("时标", 110, u -> TIME_FORMAT.format(u.timestamp())));
+        table.getColumns().add(column("时标", 110,
+                u -> u.isPlaceholder() ? "" : TIME_FORMAT.format(u.timestamp())));
 
         Button clear = new Button("清空");
         clear.setOnAction(e -> store.clear());
@@ -58,6 +59,7 @@ public final class LiveDataPanel extends BorderPane {
         }
         store.subscribe(update -> Platform.runLater(() -> applyRow(update)));
         store.subscribeClear(() -> Platform.runLater(rows::clear));
+        store.subscribeRemove(ioa -> Platform.runLater(() -> removeRow(ioa)));
     }
 
     private void applyRow(PointUpdate update) {
@@ -76,6 +78,23 @@ public final class LiveDataPanel extends BorderPane {
             }
         }
         rows.add(low, update);
+    }
+
+    private void removeRow(int ioa) {
+        int low = 0;
+        int high = rows.size() - 1;
+        while (low <= high) {
+            int mid = (low + high) >>> 1;
+            int midIoa = rows.get(mid).ioa();
+            if (midIoa < ioa) {
+                low = mid + 1;
+            } else if (midIoa > ioa) {
+                high = mid - 1;
+            } else {
+                rows.remove(mid);
+                return;
+            }
+        }
     }
 
     private static <T> TableColumn<PointUpdate, T> column(String title, int width,

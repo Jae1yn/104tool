@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,6 +20,7 @@ public final class PointTable {
     private final Path file;
     private final ObjectMapper mapper = new ObjectMapper();
     private final List<ControlPoint> points = new ArrayList<>();
+    private final List<Runnable> subscribers = new CopyOnWriteArrayList<>();
 
     public PointTable(Path file) {
         this.file = file;
@@ -42,23 +44,43 @@ public final class PointTable {
         return points.stream().sorted(Comparator.comparingInt(ControlPoint::ioa)).toList();
     }
 
-    public synchronized void add(ControlPoint point) {
-        if (points.stream().anyMatch(p -> p.ioa() == point.ioa())) {
-            throw new IllegalArgumentException("IOA=" + point.ioa() + " 已存在于点表中");
+    public void add(ControlPoint point) {
+        synchronized (this) {
+            if (points.stream().anyMatch(p -> p.ioa() == point.ioa())) {
+                throw new IllegalArgumentException("IOA=" + point.ioa() + " 已存在于点表中");
+            }
+            points.add(point);
+            save();
         }
-        points.add(point);
-        save();
+        notifyChanged();
     }
 
-    public synchronized void remove(int ioa) {
-        points.removeIf(p -> p.ioa() == ioa);
-        save();
+    public void remove(int ioa) {
+        synchronized (this) {
+            points.removeIf(p -> p.ioa() == ioa);
+            save();
+        }
+        notifyChanged();
     }
 
-    public synchronized void update(ControlPoint point) {
-        remove(point.ioa());
-        points.add(point);
-        save();
+    public void update(ControlPoint point) {
+        synchronized (this) {
+            points.removeIf(p -> p.ioa() == point.ioa());
+            points.add(point);
+            save();
+        }
+        notifyChanged();
+    }
+
+    /** 点表内容变更（增/删/改）后回调，发生在变更调用线程上。 */
+    public void subscribe(Runnable subscriber) {
+        subscribers.add(subscriber);
+    }
+
+    private void notifyChanged() {
+        for (Runnable subscriber : subscribers) {
+            subscriber.run();
+        }
     }
 
     private void save() {
