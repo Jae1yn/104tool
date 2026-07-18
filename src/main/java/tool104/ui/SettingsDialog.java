@@ -24,7 +24,7 @@ import tool104.protocol.model.ConnectionMode;
 public final class SettingsDialog extends Dialog<Settings> {
 
     private final ToggleGroup modeGroup = new ToggleGroup();
-    private final RadioButton listenMode = new RadioButton("监听子站连入（工具作为服务端，默认）");
+    private final RadioButton listenMode = new RadioButton("监听子站连入（工具作为服务端）");
     private final RadioButton dialMode = new RadioButton("主动拨号连接子站（工具作为客户端）");
     private final Label hostLabel = new Label("子站地址");
     private final TextField hostField = new TextField();

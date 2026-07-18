@@ -19,7 +19,7 @@ import org.openmuc.j60870.ie.InformationObject;
 
 /**
  * 模拟子站（服务端角色）：用于验证工具的"客户端拨号"连接模式（ADR-0003）。
- * 与 {@link SimulatedSubstation}（子站扮演客户端，验证工具默认的服务端监听模式）互补。
+ * 与 {@link SimulatedSubstation}（子站扮演客户端，验证工具的服务端监听模式）互补。
  * 监听端口，等待工具拨入，应答总召/对时/遥控，周期性上送遥测遥信。
  * 用法: SimulatedSubstationServer [port] [运行秒数]
  */

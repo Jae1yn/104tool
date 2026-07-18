@@ -7,8 +7,8 @@ import tool104.protocol.model.CommandResult;
 import tool104.protocol.model.ConnectionMode;
 
 /**
- * 主站替身会话：与子站之间建立 TCP 连接（默认作为服务端监听子站拨入，见 ADR-0002；
- * 也可切换为客户端主动拨号连接子站，见 ADR-0003），
+ * 主站替身会话：与子站之间建立 TCP 连接（客户端主动拨号连接子站为默认，见 ADR-0003；
+ * 也可切换为服务端监听子站拨入，见 ADR-0002），
  * 之后可下发总召唤、时钟同步、单点遥控，并通过 {@link SessionListener} 上报事件。
  *
  * 本阶段只接受/维持单个子站连接。
