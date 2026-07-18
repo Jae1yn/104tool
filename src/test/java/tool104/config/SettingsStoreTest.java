@@ -23,6 +23,11 @@ class SettingsStoreTest {
     }
 
     @Test
+    void defaultConnectionModeIsDial() {
+        assertEquals(ConnectionMode.DIAL, Settings.defaults().connectionMode());
+    }
+
+    @Test
     void corruptFileFallsBackToDefaults() throws IOException {
         Path file = dir.resolve("settings.json");
         Files.writeString(file, "{not valid json");
