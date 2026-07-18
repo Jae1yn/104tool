@@ -109,6 +109,14 @@ public class Main extends Application {
         } catch (IOException e) {
             frameLog.append(RawFrame.received("以新配置重启连接失败: " + e.getMessage() + "（端口被占用？）"));
         }
+        // 确认设置即视为要开始通信：未启动时直接按新配置发起连接，免去再点「连接子站/启动监听」
+        if (!session.isRunning()) {
+            try {
+                session.start();
+            } catch (IOException e) {
+                frameLog.append(RawFrame.received("按新配置启动连接失败: " + e.getMessage() + "（端口被占用？）"));
+            }
+        }
     }
 
     @Override
